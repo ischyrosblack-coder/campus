@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Swapyard – Buy & Sell Marketplace (MERN)
 
 `client/` React + Vite + Tailwind → deploy on **Vercel**
@@ -47,3 +48,6 @@ git branch -M main && git remote add origin <YOUR_REPO_URL> && git push -u origi
 4. Put the Vercel URL into Render's `CLIENT_URL` and redeploy the backend.
 
 Render's free tier sleeps when idle; the first request can take ~50 s.
+=======
+# campus
+>>>>>>> 1bf90b16f7cf2168248728f91dcb168893bd6b6b
