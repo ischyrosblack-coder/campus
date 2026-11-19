@@ -39,4 +39,5 @@ export const Conversation = model('Conversation', conv);
 
 const msg = new Schema({ conversation: ref('Conversation'), sender: ref('User'), text: { type: String, required: true, maxlength: 1000 } }, { timestamps: true });
 msg.index({ conversation: 1, createdAt: 1 });
+msg.index({ conversation: 1, _id: 1 });
 export const Message = model('Message', msg);
