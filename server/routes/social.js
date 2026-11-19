@@ -46,7 +46,17 @@ const member = async (req, res) => {
 
 r.get('/conversations/:id/messages', wrap(async (req, res) => {
   if (!(await member(req, res))) return;
-  res.json(await Message.find({ conversation: req.params.id }).sort({ createdAt: 1 }).limit(500));
+  const { after } = req.query;
+  if (after !== undefined && (typeof after !== 'string' || !/^[a-f\d]{24}$/i.test(after))) {
+    return res.status(400).json({ message: 'Invalid message cursor' });
+  }
+  const query = { conversation: req.params.id };
+  if (after) query._id = { $gt: after };
+  const messages = await Message.find(query)
+    .sort(after ? { _id: 1 } : { _id: -1 })
+    .limit(after ? 100 : 500)
+    .lean();
+  res.json(after ? messages : messages.reverse());
 }));
 
 r.post('/conversations/:id/messages', wrap(async (req, res) => {

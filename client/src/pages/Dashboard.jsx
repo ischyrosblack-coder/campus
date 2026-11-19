@@ -24,25 +24,127 @@ function Favourites() {
 }
 
 function Messages() {
-  const { user, notify } = useApp(), [convs, setConvs] = useState(null), [cur, setCur] = useState(null), [msgs, setMsgs] = useState([]), [text, setText] = useState('');
-  const end = useRef();
-  useEffect(() => { api('/conversations').then((c) => { setConvs(c); if (c[0]) setCur(c[0]._id); }).catch((e) => notify(e.message, true)); }, []);
+  const { user, notify } = useApp();
+  const [convs, setConvs] = useState(null), [cur, setCur] = useState(null), [msgs, setMsgs] = useState([]), [text, setText] = useState('');
+  const [conversationError, setConversationError] = useState(''), [conversationRetry, setConversationRetry] = useState(0);
+  const [loadingMessages, setLoadingMessages] = useState(false), [messageStatus, setMessageStatus] = useState('');
+  const [messageRetry, setMessageRetry] = useState(0), [sending, setSending] = useState(false);
+  const messagesPane = useRef(), lastMessageId = useRef(null), shouldAutoScroll = useRef(false);
+
   useEffect(() => {
-    if (!cur) return;
-    const pull = () => api(`/conversations/${cur}/messages`).then(setMsgs).catch(() => {});
-    pull(); const t = setInterval(pull, 5000); return () => clearInterval(t);
-  }, [cur]);
-  useEffect(() => end.current?.scrollIntoView(), [msgs]);
-  const send = async (e) => { e.preventDefault(); if (!text.trim()) return; try { const m = await api(`/conversations/${cur}/messages`, { method: 'POST', body: { text } }); setMsgs([...msgs, m]); setText(''); } catch (er) { notify(er.message, true); } };
+    const controller = new AbortController();
+    let active = true;
+    setConvs(null);
+    setConversationError('');
+    api('/conversations', { signal: controller.signal })
+      .then((data) => {
+        if (!active) return;
+        setConvs(data);
+        setCur(data[0]?._id || null);
+      })
+      .catch((error) => {
+        if (active && error.name !== 'AbortError') setConversationError('Could not load your conversations.');
+      });
+    return () => { active = false; controller.abort(); };
+  }, [conversationRetry]);
+
+  useEffect(() => {
+    if (!cur) {
+      setMsgs([]);
+      setLoadingMessages(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let active = true, timer, loaded = false;
+    lastMessageId.current = null;
+    shouldAutoScroll.current = true;
+    setMsgs([]);
+    setLoadingMessages(true);
+    setMessageStatus('');
+
+    const pull = async () => {
+      try {
+        const after = loaded ? lastMessageId.current : null;
+        const path = `/conversations/${cur}/messages${after ? `?after=${encodeURIComponent(after)}` : ''}`;
+        const incoming = await api(path, { signal: controller.signal });
+        if (!active) return;
+
+        if (!loaded) {
+          loaded = true;
+          lastMessageId.current = incoming[incoming.length - 1]?._id || null;
+          shouldAutoScroll.current = true;
+          setMsgs(incoming);
+          setLoadingMessages(false);
+        } else if (incoming.length) {
+          const pane = messagesPane.current;
+          shouldAutoScroll.current = Boolean(pane && pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80);
+          const latestId = incoming[incoming.length - 1]._id;
+          if (!lastMessageId.current || latestId > lastMessageId.current) lastMessageId.current = latestId;
+          setMsgs((current) => {
+            const known = new Set(current.map((message) => message._id));
+            const additions = incoming.filter((message) => !known.has(message._id));
+            return additions.length ? [...current, ...additions] : current;
+          });
+          const latest = incoming[incoming.length - 1];
+          setConvs((current) => current?.map((conversation) =>
+            conversation._id === cur ? { ...conversation, lastMessage: latest.text } : conversation,
+          ) || current);
+        }
+        setMessageStatus('');
+      } catch (error) {
+        if (!active || error.name === 'AbortError') return;
+        setMessageStatus(loaded ? 'Connection interrupted. Retrying…' : 'Could not load messages. Retrying…');
+        if (!loaded) setLoadingMessages(false);
+      } finally {
+        if (active && !controller.signal.aborted) timer = setTimeout(pull, 5000);
+      }
+    };
+
+    pull();
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [cur, messageRetry]);
+
+  useEffect(() => {
+    if (!shouldAutoScroll.current) return;
+    messagesPane.current?.scrollTo({ top: messagesPane.current.scrollHeight, behavior: 'smooth' });
+    shouldAutoScroll.current = false;
+  }, [msgs]);
+
+  const send = async (e) => {
+    e.preventDefault();
+    const message = text.trim();
+    if (!message || !cur || sending) return;
+    setSending(true);
+    try {
+      const sent = await api(`/conversations/${cur}/messages`, { method: 'POST', body: { text: message } });
+      if (!lastMessageId.current || sent._id > lastMessageId.current) lastMessageId.current = sent._id;
+      shouldAutoScroll.current = true;
+      setMsgs((current) => current.some((item) => item._id === sent._id) ? current : [...current, sent]);
+      setConvs((current) => current?.map((conversation) =>
+        conversation._id === cur ? { ...conversation, lastMessage: sent.text } : conversation,
+      ) || current);
+      setText('');
+    } catch (error) { notify(error.message, true); }
+    finally { setSending(false); }
+  };
+
+  if (!convs && conversationError) return <Empty title="Couldn't load messages" hint={conversationError}><button className="btn" onClick={() => setConversationRetry((retry) => retry + 1)}>Try again</button></Empty>;
   if (!convs) return <Skeletons n={2} />;
   if (!convs.length) return <Empty title="No messages yet" hint="Message a seller from any listing to start a conversation."><Link to="/explore" className="btn">Explore listings</Link></Empty>;
   return (
     <div className="grid gap-4 md:grid-cols-[260px_1fr]">
       <ul className="space-y-2">{convs.map((c) => { const o = c.buyer._id === user.id ? c.seller : c.buyer; return (
-        <li key={c._id}><button onClick={() => setCur(c._id)} className={`w-full rounded-lg p-3 text-left ${cur === c._id ? 'bg-sea text-white' : 'bg-white'}`}><p className="font-medium">{o.name}</p><p className="truncate text-sm opacity-80">{c.product?.title}</p><p className="truncate text-sm opacity-70">{c.lastMessage}</p></button></li>); })}</ul>
+        <li key={c._id}><button disabled={sending} onClick={() => setCur(c._id)} className={`w-full rounded-lg p-3 text-left disabled:opacity-70 ${cur === c._id ? 'bg-sea text-white' : 'bg-white'}`}><p className="font-medium">{o.name}</p><p className="truncate text-sm opacity-80">{c.product?.title}</p><p className="truncate text-sm opacity-70">{c.lastMessage}</p></button></li>); })}</ul>
       <div className="flex h-96 flex-col rounded-xl bg-white p-3 shadow-sm">
-        <div className="flex-1 space-y-2 overflow-y-auto">{msgs.map((m) => <div key={m._id} className={`max-w-[75%] rounded-lg px-3 py-2 ${m.sender === user.id ? 'ml-auto bg-sea text-white' : 'bg-slate-100'}`}>{m.text}</div>)}<div ref={end} /></div>
-        <form onSubmit={send} className="mt-2 flex gap-2"><input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a reply" maxLength={1000} /><button className="btn">Send</button></form>
+        <div ref={messagesPane} className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+          {loadingMessages ? <p className="text-sm text-slate-500">Loading messages…</p> : msgs.map((m) => <div key={m._id} className={`max-w-[75%] rounded-lg px-3 py-2 ${m.sender === user.id ? 'ml-auto bg-sea text-white' : 'bg-slate-100'}`}>{m.text}</div>)}
+          {messageStatus && <p role="status" className="text-center text-xs text-slate-500">{messageStatus}</p>}
+        </div>
+        <form onSubmit={send} className="mt-2 flex gap-2">
+          <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a reply" maxLength={1000} disabled={sending} />
+          <button className="btn" disabled={!text.trim() || sending}>{sending ? 'Sending…' : 'Send'}</button>
+        </form>
       </div>
     </div>
   );

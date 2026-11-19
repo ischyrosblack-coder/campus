@@ -28,7 +28,10 @@ export default function App() {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 border-b bg-white/95 backdrop-blur">
         <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-1 px-4 py-3">
-          <Link to="/" className="mr-auto font-display text-2xl font-extrabold text-sea">Swapyard</Link>
+          <Link to="/" className="mr-auto inline-flex items-center gap-2 font-display text-2xl font-extrabold text-sea">
+            <img src="/favicon.svg" alt="" className="h-7 w-7" />
+            Swapyard
+          </Link>
           <NavLink to="/" end className={link}>Home</NavLink>
           <NavLink to="/explore" className={link}>Explore</NavLink>
           <a href="/#categories" className="hover:text-sea">Categories</a>
